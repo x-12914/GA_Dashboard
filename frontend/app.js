@@ -110,7 +110,13 @@ async function auditStore() {
     let html = `<div class="audit-score">Store health: <b>${r.score}</b>/100`;
     if (!r.is_shopify) html += ` <span class="pill">not detected as Shopify</span>`;
     html += `</div>`;
-    html += r.checks.map(checkRow).join("");
+    html += `<div id="audit-checks">` + r.checks.map(checkRow).join("");
+    // Placeholder for the slow PageSpeed check — filled in (or removed) below.
+    html += `<div class="check" id="speed-row">
+      <span class="dot warn"></span>
+      <div><div class="name">Mobile speed (Google PageSpeed)</div>
+      <div class="detail">checking… (can take ~30s for heavy stores)</div></div>
+    </div></div>`;
 
     if (r.cold_email) {
       html += `<div class="email-draft">
@@ -120,6 +126,20 @@ async function auditStore() {
       </div>`;
     }
     out.innerHTML = html;
+
+    // Lazily fetch the slow PageSpeed score and slot it in when ready.
+    fetch(`/api/pagespeed?url=${encodeURIComponent(url)}`)
+      .then((res) => res.json())
+      .then((d) => {
+        const row = document.getElementById("speed-row");
+        if (!row) return;
+        if (d.check) row.outerHTML = checkRow(d.check);
+        else row.remove(); // site too heavy/slow for PSI, or no key
+      })
+      .catch(() => {
+        const row = document.getElementById("speed-row");
+        if (row) row.remove();
+      });
 
     const copyBtn = $("#copy-email");
     if (copyBtn) {

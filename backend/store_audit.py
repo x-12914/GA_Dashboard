@@ -135,18 +135,9 @@ def audit(url: str) -> dict:
         "visitors before they ever see your products." if heavy else "",
     ))
 
-    # --- Real speed via PageSpeed Insights (optional) ------------------
-    psi = _pagespeed(final_url)
-    if psi is not None:
-        slow = psi["perf"] < 50
-        checks.append(_check(
-            "Mobile speed (Google PageSpeed)",
-            "bad" if slow else ("warn" if psi["perf"] < 80 else "good"),
-            f"Google mobile performance score: {psi['perf']}/100"
-            + (f", largest paint {psi['lcp']}." if psi.get("lcp") else "."),
-            "Speed up mobile (image sizes, fewer apps, faster theme). Google data ties "
-            "slow load directly to lost sales." if psi["perf"] < 80 else "",
-        ))
+    # NOTE: Mobile speed (Google PageSpeed) is fetched separately via
+    # pagespeed_check() / the /api/pagespeed endpoint, because PSI can take
+    # 30-120s and must not block this fast audit.
 
     bad = sum(1 for c in checks if c["status"] == "bad")
     warn = sum(1 for c in checks if c["status"] == "warn")
@@ -161,6 +152,30 @@ def audit(url: str) -> dict:
         "checks": checks,
         "top_issues": [c for c in checks if c["status"] in ("bad", "warn")][:3],
     }
+
+
+def pagespeed_check(url: str):
+    """Return a 'Mobile speed' check dict from PageSpeed, or None if unavailable.
+
+    Called separately from audit() so the slow PSI request never blocks the
+    fast audit. Returns None when no key is set or the site is too slow/heavy
+    for PSI to analyze in time.
+    """
+    url = url.strip()
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
+    psi = _pagespeed(url)
+    if psi is None:
+        return None
+    perf = psi["perf"]
+    return _check(
+        "Mobile speed (Google PageSpeed)",
+        "bad" if perf < 50 else ("warn" if perf < 80 else "good"),
+        f"Google mobile performance score: {perf}/100"
+        + (f", largest paint {psi['lcp']}." if psi.get("lcp") else "."),
+        "Speed up mobile (image sizes, fewer apps, faster theme). Google data ties "
+        "slow load directly to lost sales." if perf < 80 else "",
+    )
 
 
 def _pagespeed(url: str):

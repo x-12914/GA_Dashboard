@@ -51,6 +51,13 @@ def audit(url: str = Query(..., min_length=3), email: bool = False) -> JSONRespo
     return JSONResponse(result)
 
 
+@app.get("/api/pagespeed")
+def pagespeed(url: str = Query(..., min_length=3)) -> JSONResponse:
+    # Slow (PSI can take 30-120s); the frontend calls this lazily after the
+    # main audit renders, so the audit itself stays fast.
+    return JSONResponse({"check": store_audit.pagespeed_check(url)})
+
+
 @app.get("/")
 def index() -> FileResponse:
     return FileResponse(FRONTEND_DIR / "index.html")
