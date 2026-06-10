@@ -1,0 +1,29 @@
+[Unit]
+Description=StoreBoost - Shopify store auditor & GA advisor
+After=network.target
+
+[Service]
+Type=simple
+User=storeboost
+Group=storeboost
+WorkingDirectory=/opt/storeboost
+ExecStart=/opt/storeboost/.venv/bin/gunicorn -c /opt/storeboost/deploy/gunicorn_conf.py backend.main:app
+Restart=always
+RestartSec=5
+
+# --- Resource caps: the whole point is this can NEVER crash the box --------
+# If the app exceeds MemoryMax it is killed and restarted, instead of the
+# kernel OOM-killing one of your other services.
+MemoryHigh=600M
+MemoryMax=768M
+CPUQuota=80%
+TasksMax=200
+
+# --- Hardening ------------------------------------------------------------
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

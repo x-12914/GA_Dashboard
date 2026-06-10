@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GA Money Advisor</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <span class="logo">📈</span>
+      <div>
+        <h1>StoreBoost</h1>
+        <p class="tagline">Find what's costing your Shopify store sales — and fix it this week.</p>
+      </div>
+    </div>
+    <div class="controls">
+      <select id="days">
+        <option value="7">Last 7 days</option>
+        <option value="28" selected>Last 28 days</option>
+        <option value="90">Last 90 days</option>
+      </select>
+      <button id="refresh">Analyze</button>
+    </div>
+  </header>
+
+  <div id="statusbar" class="statusbar"></div>
+
+  <main>
+    <section class="card audit-box">
+      <h3>Free store audit — no login needed</h3>
+      <p class="audit-sub">Paste any Shopify store URL. We check it from the outside for the
+        things that quietly kill sales, and draft a cold email you can send the owner.</p>
+      <div class="audit-input">
+        <input id="store-url" type="text" placeholder="e.g. allbirds.com" />
+        <label class="chk"><input type="checkbox" id="gen-email" checked /> draft cold email</label>
+        <button id="audit-btn">Audit store</button>
+      </div>
+      <div id="audit-result" class="audit-result"></div>
+    </section>
+
+    <h2 class="section-title">Your own store (connected via Google Analytics)</h2>
+    <section id="summary" class="card summary hidden"></section>
+
+    <section class="metrics" id="metrics"></section>
+
+    <h2 class="section-title">What to do this week</h2>
+    <section id="suggestions" class="suggestions"></section>
+
+    <details class="rawdata">
+      <summary>Show raw analytics data</summary>
+      <pre id="raw"></pre>
+    </details>
+  </main>
+
+  <footer>
+    <span id="engine"></span>
+  </footer>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

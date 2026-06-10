@@ -1,0 +1,19 @@
+# Secrets — NEVER commit
+.env
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Service-account keys (GA4)
+*.json
+!package.json
+service-account*.json
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
