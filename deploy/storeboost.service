@@ -4,8 +4,9 @@ After=network.target
 
 [Service]
 Type=simple
-User=storeboost
-Group=storeboost
+# Runs as your existing user. Change these two lines if you use a different one.
+User=opt
+Group=opt
 WorkingDirectory=/opt/storeboost
 ExecStart=/opt/storeboost/.venv/bin/gunicorn -c /opt/storeboost/deploy/gunicorn_conf.py backend.main:app
 Restart=always

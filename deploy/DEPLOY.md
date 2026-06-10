@@ -29,8 +29,13 @@ If you ever need to change it, edit it in **both**:
 
 ---
 
-## Step 1 — Create a dedicated user and app directory
+## Step 1 — Pick the user to run it as
 
+**Option A (simplest): use your existing user** (e.g. `opt`). The service file
+is already set to `User=opt`. Nothing to do here — skip to Step 2.
+
+**Option B (more isolation): dedicated user.** Then set `User=storeboost` in
+`deploy/storeboost.service`:
 ```bash
 sudo useradd --system --create-home --home-dir /opt/storeboost --shell /usr/sbin/nologin storeboost
 ```
@@ -40,7 +45,7 @@ sudo useradd --system --create-home --home-dir /opt/storeboost --shell /usr/sbin
 ```bash
 sudo apt install -y git
 sudo git clone YOUR_REPO_URL /opt/storeboost
-sudo chown -R storeboost:storeboost /opt/storeboost
+sudo chown -R opt:opt /opt/storeboost      # use storeboost:storeboost if you chose Option B
 ```
 
 > Private repo? Use an HTTPS URL with a personal access token, or add a deploy
