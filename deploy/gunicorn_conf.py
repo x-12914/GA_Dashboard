@@ -13,9 +13,10 @@ bind = "127.0.0.1:8500"
 workers = 2
 worker_class = "uvicorn.workers.UvicornWorker"
 
-# The audit endpoint makes outbound calls (store fetch + PageSpeed), so allow
-# a generous request timeout but recycle workers regularly to release memory.
-timeout = 60
+# The audit endpoint makes outbound calls (store fetch + PageSpeed), and
+# PageSpeed alone can take ~50s on heavy stores, so give the worker headroom
+# before it's killed. Recycle workers regularly to release memory.
+timeout = 120
 graceful_timeout = 30
 max_requests = 500
 max_requests_jitter = 50

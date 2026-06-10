@@ -170,7 +170,8 @@ def _pagespeed(url: str):
         return None
     try:
         params = {"url": url, "strategy": "mobile", "key": key, "category": "performance"}
-        with httpx.Client(timeout=30.0) as client:
+        # PageSpeed loads the page in a real browser — heavy stores can take 40s+.
+        with httpx.Client(timeout=55.0) as client:
             r = client.get(
                 "https://www.googleapis.com/pagespeedonline/v5/runPagespeed",
                 params=params,
