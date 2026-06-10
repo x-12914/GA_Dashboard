@@ -104,3 +104,4 @@ This MVP is single-property (yours). To sell it to others, the path is:
    their top 3 actions every Monday. (Schedule `analyzer.analyze` per user.)
 4. **Niche it** – e.g. "GA advisor for Shopify stores" converts far better
    than a generic tool.
+# GA_Dashboard
