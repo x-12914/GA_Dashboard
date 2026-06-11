@@ -6,7 +6,8 @@ cold-outreach engine: every finding is verifiably true about *their* store.
 """
 from __future__ import annotations
 
-import re
+import json
+from urllib.parse import urljoin
 
 import httpx
 from bs4 import BeautifulSoup
@@ -25,10 +26,53 @@ EMAIL_APPS = ["klaviyo", "privy", "mailchimp", "omnisend", "justuno", "sumo"]
 TRUST_WORDS = ["money-back", "money back", "satisfaction guarantee", "secure checkout",
                "free shipping", "free returns", "30-day", "ssl", "trusted"]
 URGENCY_WORDS = ["only", "left in stock", "selling fast", "limited", "ends in", "hurry"]
+SOCIAL_DOMAINS = {
+    "facebook.com": "Facebook", "instagram.com": "Instagram", "tiktok.com": "TikTok",
+    "twitter.com": "X/Twitter", "x.com": "X/Twitter", "youtube.com": "YouTube",
+    "pinterest.com": "Pinterest", "linkedin.com": "LinkedIn",
+}
 
 
 def _check(name, status, detail, fix=""):
     return {"name": name, "status": status, "detail": detail, "fix": fix}
+
+
+# --------------------------------------------------------------------------
+# Structured data (schema.org) helpers
+# --------------------------------------------------------------------------
+def _iter_jsonld(data):
+    """Yield each schema object from a parsed JSON-LD blob (handles @graph/lists)."""
+    if isinstance(data, dict):
+        if isinstance(data.get("@graph"), list):
+            for x in data["@graph"]:
+                yield from _iter_jsonld(x)
+        else:
+            yield data
+    elif isinstance(data, list):
+        for x in data:
+            yield from _iter_jsonld(x)
+
+
+def _schema_types(soup) -> set:
+    """Collect all schema.org @type values present (JSON-LD + microdata)."""
+    types: set[str] = set()
+    for tag in soup.find_all("script", attrs={"type": "application/ld+json"}):
+        raw = tag.string or tag.get_text() or ""
+        try:
+            data = json.loads(raw)
+        except Exception:
+            continue
+        for obj in _iter_jsonld(data):
+            t = obj.get("@type")
+            if isinstance(t, list):
+                types.update(str(x) for x in t)
+            elif isinstance(t, str):
+                types.add(t)
+    for el in soup.find_all(attrs={"itemtype": True}):
+        it = el.get("itemtype", "")
+        if "schema.org" in it:
+            types.add(it.rstrip("/").split("/")[-1])
+    return types
 
 
 def audit(url: str) -> dict:
@@ -135,23 +179,159 @@ def audit(url: str) -> dict:
         "visitors before they ever see your products." if heavy else "",
     ))
 
+    # --- Structured data / rich snippets (schema.org) ------------------
+    schema_types = _schema_types(soup)
+    key_schema = {"Product", "Organization", "WebSite", "BreadcrumbList", "Store"}
+    has_key_schema = bool(schema_types & key_schema)
+    checks.append(_check(
+        "Structured data (schema.org)",
+        "good" if has_key_schema else "warn",
+        f"Found: {', '.join(sorted(schema_types)[:6])}." if schema_types
+        else "No schema.org structured data found.",
+        "" if has_key_schema else
+        "Add structured data (Organization, Product, Breadcrumb) so Google can show "
+        "rich results — logo, sitelinks, star ratings. More clicks from the same ranking.",
+    ))
+
+    # --- Image alt-text coverage ---------------------------------------
+    if len(imgs) >= 5:
+        with_alt = sum(1 for i in imgs if (i.get("alt") or "").strip())
+        cov = with_alt / len(imgs)
+        checks.append(_check(
+            "Image alt text",
+            "good" if cov >= 0.7 else ("warn" if cov >= 0.4 else "bad"),
+            f"{with_alt}/{len(imgs)} images have alt text ({round(cov * 100)}%).",
+            "" if cov >= 0.7 else
+            "Add descriptive alt text to product images — Google Images sends free "
+            "buyer traffic, and it improves accessibility.",
+        ))
+
+    # --- Social media presence -----------------------------------------
+    social_found = set()
+    for a in soup.find_all("a", href=True):
+        h = a["href"].lower()
+        for dom, name in SOCIAL_DOMAINS.items():
+            if dom in h:
+                social_found.add(name)
+    checks.append(_check(
+        "Social media presence",
+        "good" if len(social_found) >= 2 else ("warn" if social_found else "bad"),
+        f"Linked: {', '.join(sorted(social_found))}." if social_found
+        else "No social media links found.",
+        "" if len(social_found) >= 2 else
+        "Link your active social profiles — they're social proof and a free traffic / "
+        "retargeting source.",
+    ))
+
+    # --- Blog / content presence ---------------------------------------
+    has_blog = bool(soup.find("a", href=lambda h: h and ("/blogs" in h or "/blog" in h)))
+    checks.append(_check(
+        "Blog / content",
+        "good" if has_blog else "warn",
+        "Blog / content section found." if has_blog
+        else "No blog or content section detected.",
+        "" if has_blog else
+        "Add a blog. Content earns free Google traffic and builds trust before the sale.",
+    ))
+
+    # --- Product page deep-dive (where conversion is won/lost) ----------
+    product_url = _find_product_url(soup, final_url)
+    if product_url:
+        checks.extend(_product_page_checks(product_url))
+
     # NOTE: Mobile speed (Google PageSpeed) is fetched separately via
     # pagespeed_check() / the /api/pagespeed endpoint, because PSI can take
     # 30-120s and must not block this fast audit.
 
-    bad = sum(1 for c in checks if c["status"] == "bad")
+    good = sum(1 for c in checks if c["status"] == "good")
     warn = sum(1 for c in checks if c["status"] == "warn")
-    score = max(0, 100 - bad * 18 - warn * 7)
+    total = len(checks) or 1
+    score = round(100 * (good + 0.5 * warn) / total)  # proportional, scales with checks
+
+    # Lead with the most serious issues (bad before warn) for the cold email.
+    issues = ([c for c in checks if c["status"] == "bad"]
+              + [c for c in checks if c["status"] == "warn"])
 
     return {
         "url": final_url,
         "ok": True,
         "is_shopify": is_shopify,
         "status_code": status_code,
+        "product_url": product_url,
         "score": score,
         "checks": checks,
-        "top_issues": [c for c in checks if c["status"] in ("bad", "warn")][:3],
+        "top_issues": issues[:3],
     }
+
+
+def _find_product_url(soup, base_url):
+    """Find the first product page link on the homepage (Shopify uses /products/)."""
+    for a in soup.find_all("a", href=True):
+        if "/products/" in a["href"]:
+            return urljoin(base_url, a["href"].split("?")[0])
+    return None
+
+
+def _product_page_checks(product_url: str) -> list:
+    """Fetch a real product page and run conversion checks on it."""
+    try:
+        with httpx.Client(follow_redirects=True, timeout=15.0,
+                          headers={"User-Agent": UA}) as client:
+            html = client.get(product_url).text
+    except Exception:
+        return []
+
+    soup = BeautifulSoup(html, "html.parser")
+    low = html.lower()
+    checks = []
+
+    # Reviews matter MOST on the product page — that's the buy decision.
+    has_rev = (any(a in low for a in REVIEW_APPS)
+               or ("review" in low and ("star" in low or "rating" in low)))
+    checks.append(_check(
+        "Product page — reviews",
+        "good" if has_rev else "bad",
+        "Reviews/ratings present on the product page." if has_rev
+        else "No reviews on the product page itself.",
+        "" if has_rev else
+        "Reviews matter most on the product page — that's where people decide. Add them here.",
+    ))
+
+    # Clear add-to-cart.
+    has_atc = ("add to cart" in low or "add_to_cart" in low
+               or 'name="add"' in low or "/cart/add" in low)
+    checks.append(_check(
+        "Product page — add to cart",
+        "good" if has_atc else "warn",
+        "Add-to-cart action detected." if has_atc
+        else "Couldn't clearly detect an add-to-cart button.",
+        "" if has_atc else
+        "Make the add-to-cart button obvious and above the fold.",
+    ))
+
+    # Multiple product photos build buying confidence.
+    n_imgs = len(soup.find_all("img"))
+    checks.append(_check(
+        "Product page — images",
+        "good" if n_imgs >= 3 else "warn",
+        f"{n_imgs} images on the product page.",
+        "" if n_imgs >= 3 else
+        "Add multiple photos (angles, in-use, scale). More images = more confidence = more sales.",
+    ))
+
+    # Product schema → price + stars in Google results (big CTR lift).
+    has_product_schema = "Product" in _schema_types(soup)
+    checks.append(_check(
+        "Product page — rich snippets (Product schema)",
+        "good" if has_product_schema else "warn",
+        "Product structured data present (can show price/stars in Google)." if has_product_schema
+        else "No Product schema found on the product page.",
+        "" if has_product_schema else
+        "Add Product structured data so Google can show price and star ratings in search "
+        "— a big click-through boost.",
+    ))
+
+    return checks
 
 
 def pagespeed_check(url: str):
