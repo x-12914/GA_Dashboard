@@ -37,13 +37,23 @@ Return ONLY valid JSON, no markdown, in exactly this shape:
 
 USER_PROMPT = "Here is the GA4 report:\n"
 
-COLD_EMAIL_SYSTEM = """You write short, friendly cold outreach emails to Shopify \
-store owners. You are given a public audit of their store. Write an email that:
-- Opens with ONE specific, true observation from the audit (builds credibility).
-- Lists their top 2-3 issues as quick wins, in plain language, no jargon.
-- Offers a free deeper look once they connect their Google Analytics.
-- Is under 120 words, warm, not salesy, with a clear soft CTA.
-Return ONLY the email body as plain text (no subject line, no markdown)."""
+COLD_EMAIL_SYSTEM = """You write short, sharp cold emails to small Shopify store \
+owners. The goal is a REPLY, not a sale. You're given the store URL and the \
+concrete issues a public audit found. Write like a real person who actually \
+looked at their store.
+
+Hard rules:
+- FIRST line is a subject: `Subject: <6-9 words, specific to their store, not salesy>`. Then a blank line, then the body.
+- Open the body with ONE specific, true observation about THEIR store — the single highest-impact issue. Be concrete.
+- NEVER mention a "score" or any invented number (e.g. "you scored 43"). It's meaningless to them and screams automation.
+- In one plain sentence, say why that issue quietly costs them sales (a non-technical owner must get it).
+- Keep the WHOLE email under 90 words. Max 3 short paragraphs. Tight and skimmable.
+- Tone: warm, casual, peer-to-peer — a helpful person, not a vendor. No hype, no exclamation spam, no buzzwords ("leverage", "boost conversions", "synergy", "circle back").
+- Pick only the 1 (at most 2) most compelling issues. Do NOT list everything.
+- Close with a low-pressure, curiosity CTA: offer a free deeper breakdown of where they're losing buyers once they connect Google Analytics (takes 2 min). No hard ask.
+- Sign as [Your name].
+
+Return ONLY the subject line + body as plain text. No markdown, no preamble."""
 
 
 def cold_email(audit: dict) -> dict:
@@ -60,8 +70,8 @@ def cold_email(audit: dict) -> dict:
 
 def _cold_email_llm(audit: dict, provider: str) -> str:
     payload = json.dumps(
-        {"url": audit.get("url"), "score": audit.get("score"),
-         "issues": audit.get("top_issues", [])}, indent=2)
+        {"store_url": audit.get("url"),
+         "issues_found": audit.get("top_issues", [])}, indent=2)
     if provider == "openai":
         from openai import OpenAI
         client = OpenAI(api_key=settings.OPENAI_API_KEY)
@@ -81,19 +91,33 @@ def _cold_email_llm(audit: dict, provider: str) -> str:
 
 
 def _cold_email_template(audit: dict) -> str:
+    domain = (
+        (audit.get("url", "") or "")
+        .replace("https://", "").replace("http://", "").strip("/").split("/")[0]
+    )
     issues = audit.get("top_issues", [])
-    lines = [f"  • {c['name']}: {c['fix'] or c['detail']}" for c in issues[:3]]
-    bullets = "\n".join(lines) if lines else "  • A few quick conversion wins"
+    top = issues[0] if issues else None
+    if top:
+        what = (top["fix"] or top["detail"]).rstrip(".")
+        opener = (
+            f"I was browsing {domain} and noticed one quick thing: "
+            f"{top['name'].lower()} — {what}."
+        )
+    else:
+        opener = (
+            f"I was browsing {domain} and spotted a couple of small things that are "
+            "probably costing you sales."
+        )
     return (
+        f"Subject: a quick thing I noticed on {domain}\n\n"
         "Hi there,\n\n"
-        "I was looking at your store and noticed a few quick things that are likely "
-        "costing you sales:\n\n"
-        f"{bullets}\n\n"
-        "These are just what I can see from the outside. If you connect your Google "
-        "Analytics (takes 2 minutes), I'll send you a free breakdown of exactly where "
-        "in your funnel you're losing buyers — no charge, no commitment.\n\n"
-        "Want me to send it over?\n\n"
-        "Best,\n[Your name]"
+        f"{opener} It's the kind of small fix that quietly loses first-time "
+        "visitors before they buy.\n\n"
+        "That's just what I can see from the outside. If you connect your Google "
+        "Analytics (2 min), I'll send a free breakdown of exactly where buyers are "
+        "dropping off — no charge, no pitch.\n\n"
+        "Worth a look?\n\n"
+        "[Your name]"
     )
 
 
