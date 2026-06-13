@@ -37,88 +37,116 @@ Return ONLY valid JSON, no markdown, in exactly this shape:
 
 USER_PROMPT = "Here is the GA4 report:\n"
 
-COLD_EMAIL_SYSTEM = """You write short, sharp cold emails to small Shopify store \
-owners. The goal is a REPLY, not a sale. You're given the store URL and the \
-concrete issues a public audit found. Write like a real person who actually \
-looked at their store.
+# The proven email is a FIXED template. Only the personalized opening hook is
+# generated per store; the rest is the exact copy that's been sent and works.
+COLD_EMAIL_BODY = (
+    "I built a tool that connects to Google Analytics and pinpoints exactly where "
+    "visitors are dropping off before they buy. If you're open to it, I'd happily run "
+    "a quick, free analysis and show you the biggest opportunities — no obligation.\n\n"
+    "Just reply and I'll send the details.\n\n"
+    "Best,\n[Your Name]"
+)
 
-Hard rules:
-- FIRST line is a subject: `Subject: <6-9 words, specific to their store, not salesy>`. Then a blank line, then the body.
-- Open the body with ONE specific, true observation about THEIR store — the single highest-impact issue. Be concrete.
-- NEVER mention a "score" or any invented number (e.g. "you scored 43"). It's meaningless to them and screams automation.
-- In one plain sentence, say why that issue quietly costs them sales (a non-technical owner must get it).
-- Keep the WHOLE email under 90 words. Max 3 short paragraphs. Tight and skimmable.
-- Tone: warm, casual, peer-to-peer — a helpful person, not a vendor. No hype, no exclamation spam, no buzzwords ("leverage", "boost conversions", "synergy", "circle back").
-- Pick only the 1 (at most 2) most compelling issues. Do NOT list everything.
-- Close with a low-pressure, curiosity CTA: offer a free deeper breakdown of where they're losing buyers once they connect Google Analytics (takes 2 min). No hard ask.
-- Sign as [Your name].
+HOOK_SYSTEM = """You write the FIRST line of a cold email to a Shopify store owner, \
+based on one concrete issue found on their store. Use exactly this pattern:
 
-Return ONLY the subject line + body as plain text. No markdown, no preamble."""
+"I was looking through your store and noticed <specific, true observation>. That's usually <one plain reason it quietly costs sales>."
+
+Rules:
+- 1-2 sentences, under 45 words. Warm, human, plain — never salesy or jargony.
+- Be specific to the given issue. NEVER invent a number or mention a "score";
+  only cite a number if it appears in the issue text (e.g. a real PageSpeed score).
+- Return ONLY those sentences — no subject, no greeting, no sign-off."""
 
 
 def cold_email(audit: dict) -> dict:
-    """Generate a ready-to-send cold email from a store audit."""
+    """Assemble the proven cold email: fixed template + one tailored hook line."""
+    domain = _domain_of(audit.get("url", ""))
+    store = (audit.get("store_name") or "").strip()
+    greeting = f"Hi {store} team," if store else "Hi there,"
+
     provider = settings.provider
+    engine = "template"
+    hook = None
     if provider != "heuristic":
         try:
-            body = _cold_email_llm(audit, provider)
-            return {"email": body, "engine": provider}
+            hook = _hook_llm(audit, provider)
+            engine = provider
         except Exception:
-            pass
-    return {"email": _cold_email_template(audit), "engine": "template"}
+            hook = None
+    if not hook:
+        hook = _hook_template(audit)
+
+    email = (f"Subject: quick note on {domain}\n\n"
+             f"{greeting}\n\n{hook}\n\n{COLD_EMAIL_BODY}")
+    return {"email": email, "engine": engine}
 
 
-def _cold_email_llm(audit: dict, provider: str) -> str:
-    payload = json.dumps(
-        {"store_url": audit.get("url"),
-         "issues_found": audit.get("top_issues", [])}, indent=2)
+def _domain_of(url: str) -> str:
+    return url.split("//")[-1].split("/")[0].replace("www.", "") if url else "your store"
+
+
+def _top_issue_text(audit: dict) -> str:
+    top = (audit.get("top_issues") or [None])[0]
+    if not top:
+        return "general conversion issues, nothing major broken"
+    return f"{top['name']}: {top.get('detail', '')} {top.get('fix', '')}".strip()
+
+
+def _hook_llm(audit: dict, provider: str) -> str:
+    issue = _top_issue_text(audit)
     if provider == "openai":
         from openai import OpenAI
         client = OpenAI(api_key=settings.OPENAI_API_KEY)
         resp = client.chat.completions.create(
             model=settings.OPENAI_MODEL,
-            messages=[{"role": "system", "content": COLD_EMAIL_SYSTEM},
-                      {"role": "user", "content": payload}],
+            messages=[{"role": "system", "content": HOOK_SYSTEM},
+                      {"role": "user", "content": issue}],
         )
         return resp.choices[0].message.content.strip()
     import anthropic
     client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
     msg = client.messages.create(
-        model=settings.ANTHROPIC_MODEL, max_tokens=500,
-        system=COLD_EMAIL_SYSTEM,
-        messages=[{"role": "user", "content": payload}])
+        model=settings.ANTHROPIC_MODEL, max_tokens=200,
+        system=HOOK_SYSTEM,
+        messages=[{"role": "user", "content": issue}])
     return msg.content[0].text.strip()
 
 
-def _cold_email_template(audit: dict) -> str:
-    domain = (
-        (audit.get("url", "") or "")
-        .replace("https://", "").replace("http://", "").strip("/").split("/")[0]
-    )
-    issues = audit.get("top_issues", [])
+def _hook_template(audit: dict) -> str:
+    """No-LLM fallback hooks, matching the proven tone, for the common issues."""
+    issues = audit.get("top_issues") or []
     top = issues[0] if issues else None
-    if top:
-        what = (top["fix"] or top["detail"]).rstrip(".")
-        opener = (
-            f"I was browsing {domain} and noticed one quick thing: "
-            f"{top['name'].lower()} — {what}."
-        )
-    else:
-        opener = (
-            f"I was browsing {domain} and spotted a couple of small things that are "
-            "probably costing you sales."
-        )
-    return (
-        f"Subject: a quick thing I noticed on {domain}\n\n"
-        "Hi there,\n\n"
-        f"{opener} It's the kind of small fix that quietly loses first-time "
-        "visitors before they buy.\n\n"
-        "That's just what I can see from the outside. If you connect your Google "
-        "Analytics (2 min), I'll send a free breakdown of exactly where buyers are "
-        "dropping off — no charge, no pitch.\n\n"
-        "Worth a look?\n\n"
-        "[Your name]"
-    )
+    if not top:
+        return ("I was looking through your store and noticed a couple of small things "
+                "that are likely costing you sales — the kind of quiet issues that lose "
+                "first-time visitors before they buy.")
+    name = top["name"].lower()
+    if "reviews" in name:
+        return ("I was looking through your store and noticed your product pages don't "
+                "show any customer reviews. That's usually the single biggest thing "
+                "quietly holding back sales — most shoppers won't buy without seeing that "
+                "other people already did.")
+    if "mobile speed" in name:
+        detail = top.get("detail", "").split(":")[-1].strip().rstrip(".")
+        return (f"I was looking through your store and noticed your mobile pages load "
+                f"slowly ({detail}). That's usually where stores quietly lose visitors — "
+                "most people leave before a slow page finishes loading.")
+    if "email capture" in name:
+        return ("I was looking through your store and noticed there's no email signup or "
+                "popup. That's usually a quiet miss — most first-time visitors leave "
+                "without buying, and email is how you bring them back.")
+    if "social" in name:
+        return ("I was looking through your store and noticed it doesn't link to any "
+                "social profiles. That's usually a quiet miss — socials are social proof "
+                "for new shoppers and a free traffic source you're leaving on the table.")
+    if "trust" in name:
+        return ("I was looking through your store and noticed it's light on trust signals "
+                "(guarantees, free shipping, secure-checkout messaging). That's usually "
+                "what quietly stops first-time buyers from checking out.")
+    fix = (top.get("fix") or top.get("detail") or "").rstrip(".")
+    return (f"I was looking through your store and noticed {name} — {fix}. That's usually "
+            "the kind of small thing that quietly loses first-time visitors before they buy.")
 
 
 def analyze(report: dict) -> dict:

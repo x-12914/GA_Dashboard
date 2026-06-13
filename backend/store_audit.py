@@ -244,6 +244,14 @@ def audit(url: str) -> dict:
     # pagespeed_check() / the /api/pagespeed endpoint, because PSI can take
     # 30-120s and must not block this fast audit.
 
+    # Store name (for personalizing the cold-email greeting).
+    og_site = soup.find("meta", attrs={"property": "og:site_name"})
+    store_name = (og_site.get("content") or "").strip() if og_site else ""
+    if not store_name and title:
+        store_name = re.split(r"[|\-–—:·]", title)[0].strip()
+    if len(store_name) > 40:  # likely a tagline, not a name
+        store_name = ""
+
     good = sum(1 for c in checks if c["status"] == "good")
     warn = sum(1 for c in checks if c["status"] == "warn")
     total = len(checks) or 1
@@ -258,6 +266,7 @@ def audit(url: str) -> dict:
         "ok": True,
         "is_shopify": is_shopify,
         "status_code": status_code,
+        "store_name": store_name,
         "product_url": product_url,
         "score": score,
         "checks": checks,
