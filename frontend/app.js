@@ -160,6 +160,106 @@ async function auditStore() {
 $("#audit-btn").addEventListener("click", auditStore);
 $("#store-url").addEventListener("keydown", (e) => { if (e.key === "Enter") auditStore(); });
 
+// ---- Prospect Finder -----------------------------------------------------
+function healthClass(s) { return s >= 75 ? "health-good" : s >= 55 ? "health-mid" : "health-bad"; }
+
+function prospectRow(p, i) {
+  const hook = p.best_hook ? p.best_hook.name : "—";
+  const email = p.email
+    ? `<code>${p.email}</code> <button class="copy-mini" data-email="${p.email}">copy</button>`
+    : `<span style="color:var(--high)">no email found</span>`;
+  return `<div class="prospect-row" data-url="${p.url}">
+    <div class="prospect-rank">${i + 1}</div>
+    <div class="prospect-main">
+      <div class="dom"><a href="https://${p.domain}" target="_blank" rel="noopener">${p.domain}</a>
+        <span class="health-pill ${healthClass(p.score)}">health ${p.score}</span></div>
+      <div class="prospect-meta">Top hook: <span class="hook">${hook}</span> · ${p.bad_count} issues</div>
+      <div class="prospect-email">${email}</div>
+    </div>
+    <div class="prospect-actions">
+      <button class="draft-one" data-url="${p.url}">Draft email</button>
+    </div>
+    <div class="prospect-emaildraft" style="grid-column:1/-1"></div>
+  </div>`;
+}
+
+async function runProspect(body, btn) {
+  const out = $("#prospect-result");
+  const note = $("#prospect-note");
+  btn.disabled = true;
+  const label = btn.textContent;
+  btn.textContent = "Working…";
+  out.innerHTML = `<div class="loading">Discovering, auditing, and finding emails… (this can take ~30s)</div>`;
+  note.textContent = "";
+  try {
+    const r = await (await fetch("/api/prospect", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    })).json();
+
+    if (body.niche && !r.discovery_ready) {
+      note.innerHTML = `⚠ Niche auto-discovery needs Google Custom Search set up. For now, paste store URLs in the box below instead.`;
+    } else if (r.discovered_from) {
+      note.textContent = `Discovered ${r.count} store(s) for “${r.discovered_from}”, ranked best-first.`;
+    } else {
+      note.textContent = `${r.count} store(s) audited and ranked best-first.`;
+    }
+
+    out.innerHTML = (r.prospects || []).length
+      ? r.prospects.map(prospectRow).join("")
+      : `<div class="loading">No Shopify prospects found. Try a different niche or paste URLs.</div>`;
+
+    wireProspectButtons();
+  } catch (e) {
+    out.innerHTML = `<div class="loading">Error: ${e}</div>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = label;
+  }
+}
+
+function wireProspectButtons() {
+  document.querySelectorAll(".copy-mini").forEach((b) =>
+    b.addEventListener("click", () => {
+      navigator.clipboard.writeText(b.dataset.email);
+      b.textContent = "copied ✓";
+      setTimeout(() => (b.textContent = "copy"), 1200);
+    })
+  );
+  document.querySelectorAll(".draft-one").forEach((b) =>
+    b.addEventListener("click", async () => {
+      const row = b.closest(".prospect-row");
+      const box = row.querySelector(".prospect-emaildraft");
+      b.disabled = true; b.textContent = "Drafting…";
+      try {
+        const r = await (await fetch(`/api/audit?url=${encodeURIComponent(b.dataset.url)}&email=true`)).json();
+        const email = r.cold_email ? r.cold_email.email : "(could not draft)";
+        box.innerHTML = `<textarea>${email}</textarea>
+          <button class="copy-draft">Copy email</button>`;
+        box.querySelector(".copy-draft").addEventListener("click", () => {
+          navigator.clipboard.writeText(box.querySelector("textarea").value);
+          box.querySelector(".copy-draft").textContent = "Copied ✓";
+        });
+      } catch (e) {
+        box.innerHTML = `<div class="loading">Error: ${e}</div>`;
+      } finally {
+        b.disabled = false; b.textContent = "Draft email";
+      }
+    })
+  );
+}
+
+$("#find-btn").addEventListener("click", () => {
+  const niche = $("#niche").value.trim();
+  if (!niche) { $("#niche").focus(); return; }
+  runProspect({ niche, want_email: true }, $("#find-btn"));
+});
+$("#niche").addEventListener("keydown", (e) => { if (e.key === "Enter") $("#find-btn").click(); });
+$("#audit-batch-btn").addEventListener("click", () => {
+  const urls = $("#urls").value.split("\n").map((s) => s.trim()).filter(Boolean);
+  if (!urls.length) { $("#urls").focus(); return; }
+  runProspect({ urls, want_email: true }, $("#audit-batch-btn"));
+});
+
 $("#refresh").addEventListener("click", analyze);
 loadStatus();
 analyze();

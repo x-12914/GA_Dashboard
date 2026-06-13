@@ -35,6 +35,23 @@ class Settings:
     # in the store auditor. Free key: https://developers.google.com/speed/docs/insights/v5/get-started
     PAGESPEED_API_KEY: str = os.getenv("PAGESPEED_API_KEY", "")
 
+    # Google Programmable Search (optional) — enables auto-discovery of stores
+    # by niche in the Prospect Finder. Needs an API key (can reuse the PageSpeed
+    # one if Custom Search API is enabled on it) and a search-engine id (cx).
+    # Set up: https://programmablesearchengine.google.com  (set to search the
+    # whole web), then enable "Custom Search API" in Google Cloud.
+    GOOGLE_CSE_API_KEY: str = os.getenv("GOOGLE_CSE_API_KEY", "")
+    GOOGLE_CSE_ID: str = os.getenv("GOOGLE_CSE_ID", "")
+
+    @property
+    def cse_key(self) -> str:
+        # Fall back to the PageSpeed key (same Google account) if not set.
+        return self.GOOGLE_CSE_API_KEY or self.PAGESPEED_API_KEY
+
+    @property
+    def discovery_ready(self) -> bool:
+        return bool(self.cse_key and self.GOOGLE_CSE_ID)
+
     @property
     def ga4_ready(self) -> bool:
         return bool(self.GA4_PROPERTY_ID and self.GOOGLE_APPLICATION_CREDENTIALS)

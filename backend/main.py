@@ -7,7 +7,9 @@ from fastapi import FastAPI, Query
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import ga4_client, analyzer, store_audit
+from pydantic import BaseModel
+
+from . import ga4_client, analyzer, store_audit, prospector
 from .config import settings
 
 app = FastAPI(title="GA Money Advisor", version="0.1.0")
@@ -56,6 +58,34 @@ def pagespeed(url: str = Query(..., min_length=3)) -> JSONResponse:
     # Slow (PSI can take 30-120s); the frontend calls this lazily after the
     # main audit renders, so the audit itself stays fast.
     return JSONResponse({"check": store_audit.pagespeed_check(url)})
+
+
+class ProspectRequest(BaseModel):
+    niche: str = ""          # discover stores by niche (needs Custom Search)
+    urls: list[str] = []     # or audit a pasted list of store URLs/domains
+    want_email: bool = True
+    limit: int = 20
+
+
+@app.get("/api/prospect/status")
+def prospect_status() -> dict:
+    return {"discovery_ready": settings.discovery_ready}
+
+
+@app.post("/api/prospect")
+def prospect(req: ProspectRequest) -> JSONResponse:
+    targets = [u for u in req.urls if u.strip()]
+    discovered_from = None
+    if not targets and req.niche.strip():
+        targets = store_audit.discover_stores(req.niche, limit=min(req.limit, 30))
+        discovered_from = req.niche.strip()
+    results = prospector.find_prospects(targets, want_email=req.want_email)
+    return JSONResponse({
+        "discovered_from": discovered_from,
+        "discovery_ready": settings.discovery_ready,
+        "count": len(results),
+        "prospects": results,
+    })
 
 
 @app.get("/")

@@ -28,6 +28,23 @@
   <div id="statusbar" class="statusbar"></div>
 
   <main>
+    <section class="card prospect-box">
+      <h3>Prospect Finder — find &amp; rank stores to email</h3>
+      <p class="audit-sub">Type a niche to auto-discover stores, or paste a list of store URLs.
+        We audit each, grab the contact email, and rank the best prospects — top of the list = email first.</p>
+      <div class="audit-input">
+        <input id="niche" type="text" placeholder="niche, e.g. candles, skincare, pet accessories" />
+        <button id="find-btn">Find prospects</button>
+      </div>
+      <details class="paste-urls">
+        <summary>…or paste a list of store URLs (one per line)</summary>
+        <textarea id="urls" placeholder="bensonandclark.com&#10;thesweetgirlloft.com&#10;shineonoutlet.co.nz"></textarea>
+        <button id="audit-batch-btn">Audit pasted list</button>
+      </details>
+      <div id="prospect-note" class="audit-sub"></div>
+      <div id="prospect-result" class="prospect-result"></div>
+    </section>
+
     <section class="card audit-box">
       <h3>Free store audit — no login needed</h3>
       <p class="audit-sub">Paste any Shopify store URL. We check it from the outside for the

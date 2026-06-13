@@ -7,7 +7,8 @@ cold-outreach engine: every finding is verifiably true about *their* store.
 from __future__ import annotations
 
 import json
-from urllib.parse import urljoin
+import re
+from urllib.parse import urljoin, urlparse
 
 import httpx
 from bs4 import BeautifulSoup
@@ -356,6 +357,122 @@ def pagespeed_check(url: str):
         "Speed up mobile (image sizes, fewer apps, faster theme). Google data ties "
         "slow load directly to lost sales." if perf < 80 else "",
     )
+
+
+# --------------------------------------------------------------------------
+# Contact email extraction (kills the "find the owner's email" time-sink)
+# --------------------------------------------------------------------------
+_EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
+# Pages most likely to expose a real contact email on a Shopify store.
+_EMAIL_PATHS = ["", "/pages/contact", "/pages/contact-us", "/pages/about",
+                "/policies/refund-policy", "/policies/privacy-policy",
+                "/policies/contact-information"]
+# Junk that the email regex picks up but isn't a real contact address.
+_EMAIL_NOISE = ("sentry", "wixpress", "example.", "godaddy", "@2x", ".png", ".jpg",
+                ".gif", ".webp", ".svg", "@sentry.io", "your-email", "email@",
+                "domain.com", "test@", "@test.", "noreply", "no-reply", "@email.com",
+                "you@", "name@", "user@", "username@", "yourdomain", "yourstore",
+                "@company.com", "sentry.wixpress", "core@", "@example")
+_EMAIL_PREFIX_RANK = ["hello@", "contact@", "support@", "care@", "info@",
+                      "sales@", "team@", "help@"]
+
+
+def extract_email(url: str):
+    """Best-effort: find a public contact email by scanning a store's key pages.
+
+    Prefers addresses on the store's own domain, then common contact prefixes.
+    Returns the single best email, or None.
+    """
+    url = url.strip().rstrip("/")
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
+    site_domain = urlparse(url).netloc.lower().replace("www.", "")
+
+    found: set[str] = set()
+    try:
+        with httpx.Client(follow_redirects=True, timeout=12.0,
+                          headers={"User-Agent": UA}) as client:
+            for path in _EMAIL_PATHS:
+                try:
+                    r = client.get(url + path)
+                except Exception:
+                    continue
+                if r.status_code >= 400:
+                    continue
+                for m in _EMAIL_RE.findall(r.text):
+                    e = m.lower().strip(".")
+                    if not any(n in e for n in _EMAIL_NOISE):
+                        found.add(e)
+                # Stop early once we have a same-domain address.
+                if any(e.endswith("@" + site_domain) for e in found):
+                    break
+    except Exception:
+        return None
+
+    if not found:
+        return None
+
+    def rank(e: str):
+        same = e.endswith("@" + site_domain)
+        prefix_rank = next((i for i, p in enumerate(_EMAIL_PREFIX_RANK)
+                            if e.startswith(p)), len(_EMAIL_PREFIX_RANK))
+        return (0 if same else 1, prefix_rank, len(e))
+
+    return sorted(found, key=rank)[0]
+
+
+# --------------------------------------------------------------------------
+# Store discovery via Google Programmable Search (optional)
+# --------------------------------------------------------------------------
+_DISCOVERY_EXCLUDE = (
+    "shopify.com", "myshopify.com", "amazon.", "ebay.", "etsy.", "aliexpress.",
+    "walmart.", "instagram.com", "facebook.com", "tiktok.com", "youtube.com",
+    "pinterest.com", "twitter.com", "x.com", "linkedin.com", "reddit.com",
+    "wikipedia.org", "google.", "trustpilot.", "yelp.", "apps.shopify",
+)
+
+
+def discover_stores(niche: str, limit: int = 20) -> list[str]:
+    """Find candidate store domains for a niche via Google Custom Search.
+
+    Returns a deduped list of domains (not full URLs). Empty list if discovery
+    isn't configured. The caller still audits each to confirm it's Shopify.
+    """
+    if not settings.discovery_ready or not niche.strip():
+        return []
+    key, cx = settings.cse_key, settings.GOOGLE_CSE_ID
+    queries = [
+        f'{niche} "powered by shopify"',
+        f'{niche} shopify store',
+        f'{niche} inurl:collections',
+    ]
+    domains: list[str] = []
+    seen: set[str] = set()
+    try:
+        with httpx.Client(timeout=20.0) as client:
+            for q in queries:
+                for start in (1, 11):  # 2 pages per query = up to 20 results
+                    if len(domains) >= limit:
+                        break
+                    r = client.get(
+                        "https://www.googleapis.com/customsearch/v1",
+                        params={"key": key, "cx": cx, "q": q, "num": 10, "start": start},
+                    )
+                    if r.status_code != 200:
+                        break
+                    items = r.json().get("items", [])
+                    if not items:
+                        break
+                    for it in items:
+                        dom = urlparse(it.get("link", "")).netloc.lower().replace("www.", "")
+                        if dom and dom not in seen and not any(x in dom for x in _DISCOVERY_EXCLUDE):
+                            seen.add(dom)
+                            domains.append(dom)
+                if len(domains) >= limit:
+                    break
+    except Exception:
+        return domains[:limit]
+    return domains[:limit]
 
 
 def _pagespeed(url: str):
