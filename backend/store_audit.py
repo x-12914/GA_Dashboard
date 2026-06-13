@@ -425,11 +425,30 @@ def extract_email(url: str):
 # Store discovery via Google Programmable Search (optional)
 # --------------------------------------------------------------------------
 _DISCOVERY_EXCLUDE = (
+    # Shopify itself / marketplaces
     "shopify.com", "myshopify.com", "amazon.", "ebay.", "etsy.", "aliexpress.",
-    "walmart.", "instagram.com", "facebook.com", "tiktok.com", "youtube.com",
-    "pinterest.com", "twitter.com", "x.com", "linkedin.com", "reddit.com",
-    "wikipedia.org", "google.", "trustpilot.", "yelp.", "apps.shopify",
+    "walmart.", "alibaba.", "dhgate.", "temu.", "wish.com",
+    # social / video / Q&A
+    "instagram.com", "facebook.com", "tiktok.com", "youtube.com", "vimeo.com",
+    "pinterest.", "twitter.com", "x.com", "linkedin.com", "reddit.com", "quora.com",
+    "wikipedia.org", "medium.com", "blogspot.", "wordpress.",
+    # search / reviews / directories
+    "google.", "bing.", "trustpilot.", "yelp.", "g2.com", "capterra.", "crunchbase.",
+    # themes / page builders / other platforms
+    "themeforest.", "envato.", "templatemonster.", "dribbble.", "behance.",
+    "wix.com", "squarespace.", "bigcommerce.", "woocommerce.", "weebly.",
+    # ecommerce blogs / tools / app vendors (the stuff that polluted results)
+    "wisepops.", "omnisend.", "klaviyo.", "privy.", "judge.me", "loox.", "yotpo.",
+    "smartrmail.", "sitebuilderreport.", "builtwith.", "storeleads.", "oberlo.",
+    "printful.", "printify.", "gelato.", "hubspot.", "mailchimp.", "shopify.dev",
+    "forbes.", "shop4.io", "ecommerce-platforms.", "websitebuilderexpert.",
 )
+
+
+def _is_storefront_url(link: str) -> bool:
+    """A real store page: has /collections/ or /products/ in the path."""
+    path = urlparse(link).path.lower()
+    return "/collections/" in path or "/products/" in path
 
 
 def discover_stores(niche: str, limit: int = 20) -> list[str]:
@@ -440,17 +459,23 @@ def discover_stores(niche: str, limit: int = 20) -> list[str]:
     provider = settings.search_provider
     if provider == "none" or not niche.strip():
         return []
+    # Target actual storefront URLs (not blogs/listicles about stores).
     queries = [
-        f'{niche} "powered by shopify"',
-        f'{niche} shopify store',
-        f'{niche} inurl:collections',
+        f'{niche} inurl:/collections/',
+        f'{niche} inurl:/products/',
+        f'{niche} "powered by shopify" -inurl:blog -inurl:articles',
     ]
     domains: list[str] = []
     seen: set[str] = set()
     for q in queries:
         if len(domains) >= limit:
             break
+        powered_by = "powered by shopify" in q
         for link in _search(provider, q):
+            # For the inurl queries, require a real storefront path. The
+            # powered-by query returns homepages, so accept those as-is.
+            if not powered_by and not _is_storefront_url(link):
+                continue
             dom = urlparse(link).netloc.lower().replace("www.", "")
             if dom and dom not in seen and not any(x in dom for x in _DISCOVERY_EXCLUDE):
                 seen.add(dom)
@@ -478,7 +503,7 @@ def _search_serper(query: str) -> list[str]:
     r = httpx.post(
         "https://google.serper.dev/search",
         headers={"X-API-KEY": settings.SERPER_API_KEY, "Content-Type": "application/json"},
-        json={"q": query, "num": 20},
+        json={"q": query, "num": 30},
         timeout=20.0,
     )
     if r.status_code != 200:
