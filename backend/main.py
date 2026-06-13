@@ -69,7 +69,10 @@ class ProspectRequest(BaseModel):
 
 @app.get("/api/prospect/status")
 def prospect_status() -> dict:
-    return {"discovery_ready": settings.discovery_ready}
+    return {
+        "discovery_ready": settings.discovery_ready,
+        "search_provider": settings.search_provider,
+    }
 
 
 @app.post("/api/prospect")

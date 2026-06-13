@@ -433,14 +433,13 @@ _DISCOVERY_EXCLUDE = (
 
 
 def discover_stores(niche: str, limit: int = 20) -> list[str]:
-    """Find candidate store domains for a niche via Google Custom Search.
-
-    Returns a deduped list of domains (not full URLs). Empty list if discovery
-    isn't configured. The caller still audits each to confirm it's Shopify.
+    """Find candidate store domains for a niche using the configured search
+    provider (serper / jina / google). Returns deduped domains; the caller still
+    audits each to confirm it's Shopify. Empty list if discovery isn't set up.
     """
-    if not settings.discovery_ready or not niche.strip():
+    provider = settings.search_provider
+    if provider == "none" or not niche.strip():
         return []
-    key, cx = settings.cse_key, settings.GOOGLE_CSE_ID
     queries = [
         f'{niche} "powered by shopify"',
         f'{niche} shopify store',
@@ -448,31 +447,77 @@ def discover_stores(niche: str, limit: int = 20) -> list[str]:
     ]
     domains: list[str] = []
     seen: set[str] = set()
-    try:
-        with httpx.Client(timeout=20.0) as client:
-            for q in queries:
-                for start in (1, 11):  # 2 pages per query = up to 20 results
-                    if len(domains) >= limit:
-                        break
-                    r = client.get(
-                        "https://www.googleapis.com/customsearch/v1",
-                        params={"key": key, "cx": cx, "q": q, "num": 10, "start": start},
-                    )
-                    if r.status_code != 200:
-                        break
-                    items = r.json().get("items", [])
-                    if not items:
-                        break
-                    for it in items:
-                        dom = urlparse(it.get("link", "")).netloc.lower().replace("www.", "")
-                        if dom and dom not in seen and not any(x in dom for x in _DISCOVERY_EXCLUDE):
-                            seen.add(dom)
-                            domains.append(dom)
+    for q in queries:
+        if len(domains) >= limit:
+            break
+        for link in _search(provider, q):
+            dom = urlparse(link).netloc.lower().replace("www.", "")
+            if dom and dom not in seen and not any(x in dom for x in _DISCOVERY_EXCLUDE):
+                seen.add(dom)
+                domains.append(dom)
                 if len(domains) >= limit:
                     break
-    except Exception:
-        return domains[:limit]
     return domains[:limit]
+
+
+def _search(provider: str, query: str) -> list[str]:
+    """Return result URLs for one query from the chosen provider (never raises)."""
+    try:
+        if provider == "serper":
+            return _search_serper(query)
+        if provider == "jina":
+            return _search_jina(query)
+        if provider == "google":
+            return _search_google(query)
+    except Exception:
+        return []
+    return []
+
+
+def _search_serper(query: str) -> list[str]:
+    r = httpx.post(
+        "https://google.serper.dev/search",
+        headers={"X-API-KEY": settings.SERPER_API_KEY, "Content-Type": "application/json"},
+        json={"q": query, "num": 20},
+        timeout=20.0,
+    )
+    if r.status_code != 200:
+        return []
+    return [it.get("link", "") for it in r.json().get("organic", [])]
+
+
+def _search_jina(query: str) -> list[str]:
+    r = httpx.get(
+        "https://s.jina.ai/",
+        params={"q": query},
+        headers={
+            "Authorization": f"Bearer {settings.JINA_API_KEY}",
+            "Accept": "application/json",
+            "X-Respond-With": "no-content",  # we only need the links
+        },
+        timeout=30.0,
+    )
+    if r.status_code != 200:
+        return []
+    return [it.get("url", "") for it in r.json().get("data", [])]
+
+
+def _search_google(query: str) -> list[str]:
+    links: list[str] = []
+    with httpx.Client(timeout=20.0) as client:
+        for start in (1, 11):  # 2 pages = up to 20 results
+            r = client.get(
+                "https://www.googleapis.com/customsearch/v1",
+                params={"key": settings.cse_key, "cx": settings.GOOGLE_CSE_ID,
+                        "q": query, "num": 10, "start": start},
+            )
+            if r.status_code != 200:
+                break
+            items = r.json().get("items", [])
+            if not items:
+                break
+            links += [it.get("link", "") for it in items]
+    return links
 
 
 def _pagespeed(url: str):
