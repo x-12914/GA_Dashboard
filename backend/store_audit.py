@@ -504,7 +504,7 @@ def _search_serper(query: str) -> list[str]:
     r = httpx.post(
         "https://google.serper.dev/search",
         headers={"X-API-KEY": settings.SERPER_API_KEY, "Content-Type": "application/json"},
-        json={"q": query, "num": 30},
+        json={"q": query, "num": 10},  # some Serper plans reject num > 10
         timeout=20.0,
     )
     if r.status_code != 200:
