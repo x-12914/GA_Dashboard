@@ -17,6 +17,17 @@ app = FastAPI(title="GA Money Advisor", version="0.1.0")
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 
 
+@app.middleware("http")
+async def no_cache_frontend(request, call_next):
+    """Tell browsers to revalidate the dashboard + static assets, so a deploy
+    is picked up on a normal refresh instead of serving stale JS/CSS."""
+    response = await call_next(request)
+    path = request.url.path
+    if path == "/" or path.startswith("/static"):
+        response.headers["Cache-Control"] = "no-cache, must-revalidate"
+    return response
+
+
 @app.get("/api/status")
 def status() -> dict:
     provider = settings.provider
