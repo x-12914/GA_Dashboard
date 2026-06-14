@@ -197,16 +197,22 @@ async function runProspect(body, btn) {
     })).json();
 
     if (body.niche && !r.discovery_ready) {
-      note.innerHTML = `⚠ Niche auto-discovery needs Google Custom Search set up. For now, paste store URLs in the box below instead.`;
+      note.innerHTML = `⚠ Niche auto-discovery needs a search provider set up (Serper/Jina/Google). For now, paste store URLs in the box below instead.`;
     } else if (r.discovered_from) {
-      note.textContent = `Discovered ${r.count} store(s) for “${r.discovered_from}”, ranked best-first.`;
+      note.textContent = `Found ${r.candidates} store(s) for “${r.discovered_from}” — ${r.count} are Shopify prospects, ranked best-first.`;
     } else {
-      note.textContent = `${r.count} store(s) audited and ranked best-first.`;
+      note.textContent = `${r.count} of ${r.candidates} audited store(s) are Shopify prospects, ranked best-first.`;
     }
 
+    let emptyMsg = "No Shopify prospects found. Try a different niche or paste URLs.";
+    if (r.candidates === 0 && body.niche) {
+      emptyMsg = "The search returned no usable stores (could be a search limit, or too narrow a niche). Try again, broaden the niche, or paste URLs.";
+    } else if (r.candidates > 0) {
+      emptyMsg = `Found ${r.candidates} store(s), but none were detected as Shopify. Try a more specific niche (e.g. add a material/style).`;
+    }
     out.innerHTML = (r.prospects || []).length
       ? r.prospects.map(prospectRow).join("")
-      : `<div class="loading">No Shopify prospects found. Try a different niche or paste URLs.</div>`;
+      : `<div class="loading">${emptyMsg}</div>`;
 
     wireProspectButtons();
   } catch (e) {

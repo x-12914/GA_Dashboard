@@ -454,12 +454,6 @@ _DISCOVERY_EXCLUDE = (
 )
 
 
-def _is_storefront_url(link: str) -> bool:
-    """A real store page: has /collections/ or /products/ in the path."""
-    path = urlparse(link).path.lower()
-    return "/collections/" in path or "/products/" in path
-
-
 def discover_stores(niche: str, limit: int = 20) -> list[str]:
     """Find candidate store domains for a niche using the configured search
     provider (serper / jina / google). Returns deduped domains; the caller still
@@ -479,12 +473,10 @@ def discover_stores(niche: str, limit: int = 20) -> list[str]:
     for q in queries:
         if len(domains) >= limit:
             break
-        powered_by = "powered by shopify" in q
         for link in _search(provider, q):
-            # For the inurl queries, require a real storefront path. The
-            # powered-by query returns homepages, so accept those as-is.
-            if not powered_by and not _is_storefront_url(link):
-                continue
+            # Search engines normalize many results to the homepage, so we
+            # can't require a /collections/ path. The exclude list drops known
+            # blogs/tools, and the downstream audit confirms each is Shopify.
             dom = urlparse(link).netloc.lower().replace("www.", "")
             if dom and dom not in seen and not any(x in dom for x in _DISCOVERY_EXCLUDE):
                 seen.add(dom)

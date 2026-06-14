@@ -86,7 +86,8 @@ def prospect(req: ProspectRequest) -> JSONResponse:
     return JSONResponse({
         "discovered_from": discovered_from,
         "discovery_ready": settings.discovery_ready,
-        "count": len(results),
+        "candidates": len(targets),   # stores found before the Shopify filter
+        "count": len(results),        # actual Shopify prospects
         "prospects": results,
     })
 
