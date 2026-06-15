@@ -7,7 +7,7 @@ the single best hook. Runs audits concurrently so a batch takes seconds.
 """
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as _FTimeout
 
 from . import store_audit
 
@@ -61,13 +61,30 @@ def _evaluate(target: str, want_email: bool) -> dict | None:
 
 
 def find_prospects(targets: list[str], want_email: bool = True,
-                   shopify_only: bool = True) -> list[dict]:
-    """Audit + email-extract + rank a list of store URLs/domains, concurrently."""
-    targets = [t.strip() for t in targets if t.strip()][:40]  # safety cap
+                   shopify_only: bool = True, overall_timeout: float = 70.0) -> list[dict]:
+    """Audit + email-extract + rank a list of store URLs/domains, concurrently.
+
+    Bounded by overall_timeout: returns whatever finished by the deadline so a
+    single slow store can never hang the whole request (which would time out at
+    nginx and return an HTML error page to the browser).
+    """
+    targets = [t.strip() for t in targets if t.strip()][:15]  # safety cap
     if not targets:
         return []
-    with ThreadPoolExecutor(max_workers=8) as ex:
-        results = [r for r in ex.map(lambda t: _evaluate(t, want_email), targets) if r]
+    ex = ThreadPoolExecutor(max_workers=8)
+    futures = [ex.submit(_evaluate, t, want_email) for t in targets]
+    results: list[dict] = []
+    try:
+        for fut in as_completed(futures, timeout=overall_timeout):
+            try:
+                r = fut.result()
+            except Exception:
+                r = None
+            if r:
+                results.append(r)
+    except _FTimeout:
+        pass  # deadline hit — keep what finished, drop the stragglers
+    ex.shutdown(wait=False, cancel_futures=True)
     if shopify_only:
         results = [r for r in results if r["is_shopify"]]
     results.sort(key=lambda r: r["prospect_score"], reverse=True)

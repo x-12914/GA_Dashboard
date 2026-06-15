@@ -82,7 +82,7 @@ def audit(url: str) -> dict:
         url = "https://" + url
 
     try:
-        with httpx.Client(follow_redirects=True, timeout=15.0,
+        with httpx.Client(follow_redirects=True, timeout=12.0,
                           headers={"User-Agent": UA}) as client:
             resp = client.get(url)
             html = resp.text
@@ -285,7 +285,7 @@ def _find_product_url(soup, base_url):
 def _product_page_checks(product_url: str) -> list:
     """Fetch a real product page and run conversion checks on it."""
     try:
-        with httpx.Client(follow_redirects=True, timeout=15.0,
+        with httpx.Client(follow_redirects=True, timeout=10.0,
                           headers={"User-Agent": UA}) as client:
             html = client.get(product_url).text
     except Exception:
@@ -373,15 +373,15 @@ def pagespeed_check(url: str):
 # --------------------------------------------------------------------------
 _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
 # Pages most likely to expose a real contact email on a Shopify store.
-_EMAIL_PATHS = ["", "/pages/contact", "/pages/contact-us", "/pages/about",
-                "/policies/refund-policy", "/policies/privacy-policy",
-                "/policies/contact-information"]
+# Kept short + fast: more pages = slower batches and risk of timeouts.
+_EMAIL_PATHS = ["", "/pages/contact", "/pages/contact-us", "/policies/refund-policy"]
 # Junk that the email regex picks up but isn't a real contact address.
 _EMAIL_NOISE = ("sentry", "wixpress", "example.", "godaddy", "@2x", ".png", ".jpg",
                 ".gif", ".webp", ".svg", "@sentry.io", "your-email", "email@",
                 "domain.com", "test@", "@test.", "noreply", "no-reply", "@email.com",
                 "you@", "name@", "user@", "username@", "yourdomain", "yourstore",
-                "@company.com", "sentry.wixpress", "core@", "@example")
+                "@company.com", "sentry.wixpress", "core@", "@example",
+                "courier", "shipping@", "logistics", "fulfil", "warehouse@")
 _EMAIL_PREFIX_RANK = ["hello@", "contact@", "support@", "care@", "info@",
                       "sales@", "team@", "help@"]
 
@@ -399,7 +399,7 @@ def extract_email(url: str):
 
     found: set[str] = set()
     try:
-        with httpx.Client(follow_redirects=True, timeout=12.0,
+        with httpx.Client(follow_redirects=True, timeout=7.0,
                           headers={"User-Agent": UA}) as client:
             for path in _EMAIL_PATHS:
                 try:

@@ -192,9 +192,16 @@ async function runProspect(body, btn) {
   out.innerHTML = `<div class="loading">Discovering, auditing, and finding emails… (this can take ~30s)</div>`;
   note.textContent = "";
   try {
-    const r = await (await fetch("/api/prospect", {
+    const resp = await fetch("/api/prospect", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
-    })).json();
+    });
+    const ct = resp.headers.get("content-type") || "";
+    if (!resp.ok || !ct.includes("application/json")) {
+      throw new Error(
+        "the search took too long or the server hiccuped — try a more specific niche, fewer URLs, or run it again"
+      );
+    }
+    const r = await resp.json();
 
     if (body.niche && !r.discovery_ready) {
       note.innerHTML = `⚠ Niche auto-discovery needs a search provider set up (Serper/Jina/Google). For now, paste store URLs in the box below instead.`;

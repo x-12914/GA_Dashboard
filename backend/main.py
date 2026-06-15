@@ -91,7 +91,7 @@ def prospect(req: ProspectRequest) -> JSONResponse:
     targets = [u for u in req.urls if u.strip()]
     discovered_from = None
     if not targets and req.niche.strip():
-        targets = store_audit.discover_stores(req.niche, limit=min(req.limit, 30))
+        targets = store_audit.discover_stores(req.niche, limit=min(req.limit, 15))
         discovered_from = req.niche.strip()
     results = prospector.find_prospects(targets, want_email=req.want_email)
     return JSONResponse({
